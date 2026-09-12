@@ -1,0 +1,1246 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>Réseau de tâches</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #14171C;
+    --panel: #1B1F26;
+    --panel-raised: #232830;
+    --line: #2C3038;
+    --text: #E8E6E1;
+    --text-dim: #8A8F98;
+    --text-faint: #5B606A;
+    --accent: #7C9885;
+    --accent-soft: rgba(124,152,133,0.18);
+    --danger: #B0655B;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html,body{ height:100%; margin:0; overscroll-behavior:none; }
+  body{
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display:flex; flex-direction:column;
+    height:100vh; height:100dvh;
+    overflow:hidden;
+  }
+  #app{ flex:1; min-height:0; display:flex; flex-direction:column; position:relative; }
+  .view{ flex:1; min-height:0; display:none; flex-direction:column; overflow:hidden; }
+  .view.active{ display:flex; }
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    padding: 18px 20px 12px;
+    display:flex; align-items:baseline; justify-content:space-between;
+    flex-shrink:0;
+  }
+  .topbar h1{ font-size:19px; font-weight:600; margin:0; letter-spacing:-0.01em; }
+  .topbar .sub{ font-size:13px; color:var(--text-dim); margin-top:2px; }
+
+  /* ---------- Bottom nav ---------- */
+  nav.tabs{
+    display:flex; flex-shrink:0;
+    border-top:1px solid var(--line);
+    background: var(--panel);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  nav.tabs button{
+    flex:1; background:none; border:none; color:var(--text-faint);
+    padding:10px 4px 12px; font-family:inherit; font-size:11.5px;
+    display:flex; flex-direction:column; align-items:center; gap:5px;
+    cursor:pointer;
+  }
+  nav.tabs button svg{ width:22px; height:22px; opacity:0.6; }
+  nav.tabs button.active{ color:var(--text); }
+  nav.tabs button.active svg{ opacity:1; }
+  nav.tabs button .dot{
+    width:4px;height:4px;border-radius:50%; background:var(--accent);
+    opacity:0; margin-top:-2px;
+  }
+  nav.tabs button.active .dot{ opacity:1; }
+
+  /* ---------- FAB ---------- */
+  .fab{
+    position:absolute; right:18px;
+    bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+    width:52px; height:52px; border-radius:50%;
+    background: var(--accent); color:#12160F;
+    border:none; font-size:26px; font-weight:400;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    cursor:pointer; z-index:20;
+  }
+
+  /* ============ AUJOURD'HUI ============ */
+  #today-list{ flex:1; overflow-y:auto; padding: 4px 16px 90px; }
+  .today-summary{
+    padding: 0 20px 14px; color:var(--text-dim); font-size:13px;
+  }
+  .task-row{
+    display:flex; align-items:center; gap:12px;
+    background:var(--panel); border-radius: var(--radius);
+    padding:13px 14px; margin-bottom:8px;
+  }
+  .task-row.done{ opacity:0.45; }
+  @keyframes rowPulse{ 0%{transform:scale(1);} 35%{transform:scale(1.025); background:var(--accent-soft);} 100%{transform:scale(1);} }
+  .task-row.pulse{ animation: rowPulse 0.5s ease; }
+  @keyframes confetti-fall{
+    0%{ transform: translateY(0) rotate(0deg); opacity:0; }
+    8%{ opacity:1; }
+    100%{ transform: translateY(115vh) rotate(360deg); opacity:0; }
+  }
+  @keyframes toast-pop{
+    0%{ opacity:0; transform:translate(-50%,-50%) scale(0.85); }
+    15%{ opacity:1; transform:translate(-50%,-50%) scale(1); }
+    82%{ opacity:1; }
+    100%{ opacity:0; transform:translate(-50%,-50%) scale(0.96); }
+  }
+  .check{
+    width:22px; height:22px; border-radius:50%; flex-shrink:0;
+    border:1.5px solid var(--text-faint); background:none;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .check.checked{ background:var(--accent); border-color:var(--accent); }
+  .check svg{ width:12px; height:12px; display:none; }
+  .check.checked svg{ display:block; }
+  .task-main{ flex:1; min-width:0; }
+  .task-title{ font-size:14.5px; font-weight:500; }
+  .task-row.done .task-title{ text-decoration: line-through; }
+  .task-meta{ font-size:12px; color:var(--text-dim); margin-top:2px; display:flex; gap:8px; align-items:center; }
+  .cluster-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .unpin-btn{ background:none; border:none; color:var(--text-faint); font-size:18px; padding:4px 6px; cursor:pointer; }
+  .empty-state{ text-align:center; padding: 60px 30px; color:var(--text-dim); font-size:14px; line-height:1.6; }
+
+  /* ============ RÉSEAU ============ */
+  #graph-wrap{ flex:1; position:relative; overflow:hidden; }
+  #legend{
+    position:absolute; top:12px; left:12px; right:12px; z-index:10;
+    display:flex; gap:8px; overflow-x:auto; padding-bottom:4px;
+  }
+  .legend-chip{
+    flex-shrink:0; display:flex; align-items:center; gap:6px;
+    background: rgba(27,31,38,0.85); backdrop-filter: blur(6px);
+    border:1px solid var(--line); border-radius:20px; padding:6px 12px 6px 8px;
+    font-size:12px; color:var(--text-dim);
+  }
+  .legend-chip.off{ opacity:0.35; }
+  .legend-chip .dot{ width:8px; height:8px; border-radius:50%; }
+  svg#canvas{ width:100%; height:100%; touch-action:none; display:block; }
+  .node-ring{ fill:none; stroke-width:2px; opacity:0.5; }
+  .node-circle{ cursor:grab; }
+  .node-label{ font-family:'Inter',sans-serif; font-size:11px; fill:var(--text); pointer-events:none; text-anchor:middle; }
+  .link-line{ stroke:var(--text-faint); opacity:0.55; }
+
+  /* ============ DÉCIDER ============ */
+  #decide-view .content{ flex:1; overflow-y:auto; padding: 4px 20px 40px; }
+  .field-label{ font-size:12.5px; color:var(--text-dim); margin: 18px 0 8px; }
+  .pill-group{ display:flex; gap:8px; flex-wrap:wrap; }
+  .pill{
+    padding:9px 16px; border-radius:20px; border:1px solid var(--line);
+    background:var(--panel); color:var(--text-dim); font-size:13.5px;
+    font-family:inherit; cursor:pointer;
+  }
+  .pill.selected{ background:var(--accent-soft); border-color:var(--accent); color:var(--text); }
+  .decide-btn{
+    width:100%; margin-top:26px; padding:15px; border-radius:var(--radius);
+    background:var(--accent); color:#12160F; border:none; font-weight:600;
+    font-size:15px; font-family:inherit; cursor:pointer;
+  }
+  .result-card{
+    margin-top:24px; background:var(--panel-raised); border-radius:var(--radius);
+    padding:22px 20px; border:1px solid var(--line);
+  }
+  .result-cluster{ font-size:12.5px; color:var(--text-dim); margin-bottom:6px; }
+  .result-title{ font-size:19px; font-weight:600; line-height:1.35; }
+  .result-meta{ margin-top:10px; font-size:13px; color:var(--text-dim); }
+  .result-actions{ display:flex; gap:10px; margin-top:18px; }
+  .btn-secondary{
+    flex:1; padding:12px; border-radius:10px; background:none;
+    border:1px solid var(--line); color:var(--text-dim); font-family:inherit;
+    font-size:13.5px; cursor:pointer;
+  }
+  .btn-primary{
+    flex:1; padding:12px; border-radius:10px; background:var(--accent);
+    border:none; color:#12160F; font-family:inherit; font-weight:600;
+    font-size:13.5px; cursor:pointer;
+  }
+  .decide-empty{ margin-top:24px; color:var(--text-dim); font-size:14px; line-height:1.6; }
+
+  /* ============ MODAL ============ */
+  #overlay{
+    position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:30;
+    display:none; align-items:flex-end;
+  }
+  #overlay.open{ display:flex; }
+  #sheet{
+    background: var(--panel); width:100%; max-height:88vh; overflow-y:auto;
+    border-radius: 20px 20px 0 0; padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+  .sheet-handle{ width:36px; height:4px; background:var(--line); border-radius:2px; margin:0 auto 16px; }
+  .sheet-title{ font-size:17px; font-weight:600; margin-bottom:18px; }
+  label{ display:block; font-size:12.5px; color:var(--text-dim); margin:16px 0 7px; }
+  label:first-of-type{ margin-top:0; }
+  input[type=text], input[type=number], input[type=date], select{
+    width:100%; background:var(--panel-raised); border:1px solid var(--line);
+    border-radius:10px; padding:11px 12px; color:var(--text); font-family:inherit;
+    font-size:14.5px;
+  }
+  .row2{ display:flex; gap:10px; }
+  .row2 > div{ flex:1; }
+  .dep-list{ max-height:150px; overflow-y:auto; border:1px solid var(--line); border-radius:10px; }
+  .dep-item{ display:flex; align-items:center; gap:10px; padding:10px 12px; border-bottom:1px solid var(--line); font-size:13.5px; }
+  .dep-item:last-child{ border-bottom:none; }
+  .dep-item input{ width:16px; height:16px; }
+  .sheet-actions{ display:flex; gap:10px; margin-top:24px; }
+  .btn-delete{ background:none; border:1px solid var(--danger); color:var(--danger); border-radius:10px; padding:12px 16px; font-family:inherit; font-size:13.5px; }
+  .btn-save{ flex:1; background:var(--accent); border:none; color:#12160F; border-radius:10px; padding:12px; font-family:inherit; font-weight:600; font-size:14px; }
+  .btn-cancel{ background:none; border:1px solid var(--line); color:var(--text-dim); border-radius:10px; padding:12px 16px; font-family:inherit; font-size:13.5px; }
+
+  /* node detail sheet extra */
+  .detail-row{ display:flex; gap:10px; margin-top:14px; }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ===== AUJOURD'HUI ===== -->
+  <div class="view active" id="today-view">
+    <div class="topbar">
+      <div>
+        <h1>Aujourd'hui</h1>
+        <div class="sub" id="today-date"></div>
+      </div>
+    </div>
+    <div class="today-summary" id="today-summary"></div>
+    <div id="today-list"></div>
+  </div>
+
+  <!-- ===== RÉSEAU ===== -->
+  <div class="view" id="graph-view">
+    <div class="topbar" style="padding-bottom:0;">
+      <div><h1>Réseau</h1><div class="sub">Glisse pour déplacer · touche pour ouvrir · reste appuyé sur un domaine pour l'isoler</div></div>
+      <div style="display:flex;gap:2px;flex-shrink:0;">
+        <button id="freeze-btn" aria-label="Figer les forces" style="background:none;border:none;color:var(--text-dim);padding:4px;cursor:pointer;">
+          <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="10.5" width="14" height="9.5" rx="2.2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>
+        </button>
+        <button id="forces-btn" aria-label="Réglages des forces" style="background:none;border:none;color:var(--text-dim);padding:4px;cursor:pointer;">
+          <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h9M17 7h3M4 12h3M9 12h11M4 17h13M21 17h-1"/><circle cx="11" cy="7" r="2" fill="currentColor" stroke="none"/><circle cx="6" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="16" cy="17" r="2" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <button id="settings-btn" aria-label="Réglages" style="background:none;border:none;color:var(--text-dim);padding:4px;cursor:pointer;">
+          <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2.5 12h3M18.5 12h3M4.9 19.1l2.1-2.1M17 7l2.1-2.1"/></svg>
+        </button>
+      </div>
+    </div>
+    <div id="graph-wrap">
+      <div id="legend"></div>
+      <svg id="canvas"></svg>
+    </div>
+  </div>
+
+  <!-- ===== DÉCIDER ===== -->
+  <div class="view" id="decide-view">
+    <div class="topbar">
+      <div><h1>Décider</h1><div class="sub">Réduis le choix au lieu de le regarder en entier</div></div>
+    </div>
+    <div class="content">
+      <div class="field-label">Temps disponible</div>
+      <div class="pill-group" id="time-pills"></div>
+      <div class="field-label">Énergie du moment</div>
+      <div class="pill-group" id="energy-pills"></div>
+      <button class="decide-btn" id="decide-btn">Propose-moi quelque chose</button>
+      <button class="btn-secondary" id="decide-random-btn" style="width:100%;margin-top:10px;">Au hasard, sans critère</button>
+      <div id="decide-result"></div>
+    </div>
+  </div>
+
+  <!-- ===== FAB ===== -->
+  <button class="fab" id="fab">+</button>
+
+  <!-- ===== BOTTOM NAV ===== -->
+  <nav class="tabs">
+    <button data-view="today-view" class="active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M8 14l2.5 2.5L16 11"/></svg>
+      Aujourd'hui<span class="dot"></span>
+    </button>
+    <button data-view="graph-view">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6" cy="6" r="2.4"/><circle cx="18" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><circle cx="15" cy="14" r="3"/><path d="M8 7.5l5 5M16 8l-3 4"/></svg>
+      Réseau<span class="dot"></span>
+    </button>
+    <button data-view="decide-view">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/></svg>
+      Décider<span class="dot"></span>
+    </button>
+  </nav>
+</div>
+
+<!-- ===== MODAL SHEET ===== -->
+<div id="overlay">
+  <div id="sheet"></div>
+</div>
+
+<script>
+(function(){
+
+// ---------------------------------------------------------------
+// DATA
+// ---------------------------------------------------------------
+const CLUSTER_PALETTE = ['#C97B63','#6E8CA0','#B08BBB','#C9A227','#6FA08A','#B0655B','#7B8FC9','#A0956E'];
+let data = { nodes: [], links: [], clusterColors: {} };
+let loaded = false;
+
+function todayISO(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function uid(){ return 'n'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+
+// "35" -> 35 min · "1h30" -> 90 min · "1h" -> 60 min · "1.5h" ou "1,5h" -> 90 min
+function parseDurationInput(str){
+  if(!str) return null;
+  str = str.trim().toLowerCase().replace(',', '.');
+  if(!str) return null;
+  let m = str.match(/^(\d+)h(\d{1,2})?$/);
+  if(m) return parseInt(m[1])*60 + (m[2]?parseInt(m[2]):0);
+  m = str.match(/^(\d+(\.\d+)?)h$/);
+  if(m) return Math.round(parseFloat(m[1])*60);
+  m = str.match(/^\d+$/);
+  if(m) return parseInt(str);
+  return null;
+}
+// minutes -> "35 min" ou "1h30" pour affichage
+function formatDuration(min){
+  if(!min) return '';
+  if(min < 60) return min+' min';
+  const h = Math.floor(min/60), r = min%60;
+  return r ? `${h}h${String(r).padStart(2,'0')}` : `${h}h`;
+}
+// minutes -> valeur à remettre dans le champ texte en édition
+function formatDurationForInput(min){
+  if(!min) return '';
+  if(min < 60) return String(min);
+  const h = Math.floor(min/60), r = min%60;
+  return r ? `${h}h${String(r).padStart(2,'0')}` : `${h}h`;
+}
+
+function colorForCluster(name){
+  if(!data.clusterColors[name]){
+    const used = Object.values(data.clusterColors);
+    const next = CLUSTER_PALETTE.find(c=>!used.includes(c)) || CLUSTER_PALETTE[Object.keys(data.clusterColors).length % CLUSTER_PALETTE.length];
+    data.clusterColors[name] = next;
+  }
+  return data.clusterColors[name];
+}
+
+// Stockage portable : l'API window.storage n'existe que dans les artifacts Claude.
+// Une fois le fichier hébergé ailleurs (GitHub Pages, etc.) et ouvert dans un navigateur normal,
+// elle n'existe plus — on bascule alors automatiquement sur localStorage, qui lui fonctionne
+// dans n'importe quelle page web classique et garde les données sur l'appareil.
+const hasClaudeStorage = typeof window.storage !== 'undefined' && window.storage && typeof window.storage.get === 'function';
+
+async function storageGet(key){
+  if(hasClaudeStorage){
+    try{ return await window.storage.get(key, false); }catch(e){ return null; }
+  }
+  try{
+    const raw = localStorage.getItem(key);
+    return raw ? {key, value: raw} : null;
+  }catch(e){ return null; }
+}
+async function storageSet(key, value){
+  if(hasClaudeStorage){
+    try{ return await window.storage.set(key, value, false); }catch(e){ return null; }
+  }
+  try{ localStorage.setItem(key, value); return {key, value}; }catch(e){ return null; }
+}
+
+async function loadData(){
+  try{
+    const res = await storageGet('reseau-taches-data');
+    if(res && res.value){
+      const parsed = JSON.parse(res.value);
+      data = Object.assign({nodes:[],links:[],clusterColors:{}}, parsed);
+    }
+  }catch(e){ /* pas encore de données */ }
+  loaded = true;
+}
+let saveTimer=null;
+function save(){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async ()=>{
+    try{ await storageSet('reseau-taches-data', JSON.stringify(data)); }
+    catch(e){ console.error('Sauvegarde impossible', e); }
+  }, 250);
+}
+
+// unlocked = pas fait, et tous les prérequis (liens entrants) sont faits
+function isUnlocked(node){
+  if(node.status === 'done') return false;
+  const prereqs = data.links.filter(l=>l.to===node.id).map(l=>data.nodes.find(n=>n.id===l.from));
+  return prereqs.every(p=>p && p.status==='done');
+}
+
+// ---------------------------------------------------------------
+// NAV
+// ---------------------------------------------------------------
+const views = document.querySelectorAll('.view');
+const navBtns = document.querySelectorAll('nav.tabs button');
+navBtns.forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    navBtns.forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    views.forEach(v=>v.classList.remove('active'));
+    document.getElementById(btn.dataset.view).classList.add('active');
+    if(btn.dataset.view==='today-view') renderToday();
+    if(btn.dataset.view==='graph-view'){ renderLegend(); startSim(); }
+    else stopSim();
+    if(btn.dataset.view==='decide-view'){ document.getElementById('decide-result').innerHTML=''; }
+  });
+});
+
+// ---------------------------------------------------------------
+// FEEDBACK SENSORIEL — son, vibration, confettis
+// ---------------------------------------------------------------
+let audioCtx = null;
+function getAudioCtx(){
+  if(!audioCtx){ try{ audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+  return audioCtx;
+}
+function playTone(freq, start, duration, ctx, type, gainPeak){
+  const osc = ctx.createOscillator(), gain = ctx.createGain();
+  osc.type = type||'sine'; osc.frequency.value = freq;
+  osc.connect(gain); gain.connect(ctx.destination);
+  const t0 = ctx.currentTime + start;
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(gainPeak||0.16, t0+0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0+duration);
+  osc.start(t0); osc.stop(t0+duration+0.03);
+}
+function playChime(){
+  const ctx = getAudioCtx(); if(!ctx) return;
+  if(ctx.state==='suspended') ctx.resume();
+  playTone(880, 0, 0.16, ctx);
+  playTone(1318.5, 0.06, 0.2, ctx);
+}
+function playFanfare(){
+  const ctx = getAudioCtx(); if(!ctx) return;
+  if(ctx.state==='suspended') ctx.resume();
+  [523.25,659.25,783.99,1046.5].forEach((f,i)=> playTone(f, i*0.09, 0.35, ctx, 'triangle', 0.15));
+}
+function vibrate(pattern){
+  try{ if(navigator.vibrate) navigator.vibrate(pattern); }catch(e){}
+}
+function celebrateSmall(rowEl){
+  playChime();
+  vibrate(25);
+  if(rowEl){ rowEl.classList.remove('pulse'); void rowEl.offsetWidth; rowEl.classList.add('pulse'); }
+}
+function spawnConfetti(){
+  const layer = document.createElement('div');
+  layer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:9999;overflow:hidden;';
+  document.body.appendChild(layer);
+  const emojis = ['🎉','✨','🎊','⭐'];
+  for(let i=0;i<28;i++){
+    const span = document.createElement('span');
+    span.textContent = emojis[Math.floor(Math.random()*emojis.length)];
+    const left = Math.random()*100, size = 16+Math.random()*18;
+    const duration = 1.7+Math.random()*1.2, delay = Math.random()*0.45, rot = Math.floor(Math.random()*360);
+    span.style.cssText = `position:absolute;left:${left}%;top:-8%;font-size:${size}px;
+      animation: confetti-fall ${duration}s ease-in ${delay}s forwards;
+      transform: rotate(${rot}deg);`;
+    layer.appendChild(span);
+  }
+  setTimeout(()=>layer.remove(), 3300);
+}
+function showToast(msg){
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = `position:fixed;left:50%;top:36%;transform:translate(-50%,-50%);
+    background:var(--panel-raised);border:1px solid var(--line);color:var(--text);
+    padding:14px 22px;border-radius:14px;font-size:15px;font-weight:600;text-align:center;
+    z-index:10000;opacity:0;animation: toast-pop 2.6s ease forwards;pointer-events:none;max-width:80vw;`;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 2700);
+}
+function celebrateAllDone(){
+  playFanfare();
+  vibrate([30,60,30,60,130]);
+  spawnConfetti();
+  showToast('Journée terminée — bravo 🎉');
+}
+function checkAllDoneToday(){
+  const items = data.nodes.filter(n=>n.pinnedDate===todayISO());
+  if(items.length && items.every(n=>n.status==='done')) celebrateAllDone();
+}
+
+// ---------------------------------------------------------------
+// AUJOURD'HUI
+// ---------------------------------------------------------------
+function renderToday(){
+  document.getElementById('today-date').textContent = new Date().toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
+  const list = document.getElementById('today-list');
+  const items = data.nodes.filter(n=>n.pinnedDate===todayISO());
+  const totalMin = items.filter(n=>n.status!=='done').reduce((s,n)=>s+(n.duration||0),0);
+  const summary = document.getElementById('today-summary');
+  summary.textContent = items.length ? `${items.filter(n=>n.status!=='done').length} tâche(s) restante(s)` + (totalMin? ` · ~${formatDuration(totalMin)} estimées` : '') : '';
+
+  if(!items.length){
+    list.innerHTML = `<div class="empty-state">Rien d'épinglé pour aujourd'hui.<br>Va dans le Réseau, ouvre une tâche, et épingle-la ici — ou ajoute-en une avec le bouton +.</div>`;
+    return;
+  }
+  items.sort((a,b)=> (a.status==='done')-(b.status==='done'));
+  list.innerHTML = items.map(n=>{
+    const color = colorForCluster(n.cluster);
+    return `<div class="task-row ${n.status==='done'?'done':''}" data-id="${n.id}">
+      <button class="check ${n.status==='done'?'checked':''}" data-action="toggle" data-id="${n.id}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#12160F" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg>
+      </button>
+      <div class="task-main">
+        <div class="task-title">${escapeHtml(n.title)}</div>
+        <div class="task-meta">
+          <span class="cluster-dot" style="background:${color}"></span>
+          <span>${escapeHtml(n.cluster)}</span>
+          ${n.duration? `<span>· ${formatDuration(n.duration)}</span>`:''}
+        </div>
+      </div>
+      <button class="unpin-btn" data-action="unpin" data-id="${n.id}">×</button>
+    </div>`;
+  }).join('');
+
+  list.querySelectorAll('[data-action=toggle]').forEach(b=>b.addEventListener('click', e=>{
+    const n = data.nodes.find(x=>x.id===b.dataset.id);
+    const becomingDone = n.status !== 'done';
+    n.status = becomingDone ? 'done' : 'todo';
+    save();
+    if(becomingDone){
+      b.classList.add('checked');
+      b.closest('.task-row').classList.add('done');
+      celebrateSmall(b.closest('.task-row'));
+      setTimeout(()=>{ renderToday(); checkAllDoneToday(); }, 600);
+    }else{
+      renderToday();
+    }
+  }));
+  list.querySelectorAll('[data-action=unpin]').forEach(b=>b.addEventListener('click', e=>{
+    const n = data.nodes.find(x=>x.id===b.dataset.id);
+    n.pinnedDate = null;
+    save(); renderToday();
+  }));
+}
+
+// ---------------------------------------------------------------
+// RÉSEAU — simulation simple
+// ---------------------------------------------------------------
+const svg = document.getElementById('canvas');
+const NS = 'http://www.w3.org/2000/svg';
+let simRunning = false, rafId = null, quietFrames = 0;
+let dragNode = null, dragOffset = {x:0,y:0};
+let clusterOff = {};
+let hideDone = false;
+let frozen = false;
+const FORCE_DEFAULTS = { nodeSize:1, linkWidth:1.4, centerForce:0.0009, repelForce:3200, linkForce:0.02, linkDistance:100, siblingSpacing:60 };
+let forceConfig = Object.assign({}, FORCE_DEFAULTS);
+
+function ensurePositions(){
+  const rect = document.getElementById('graph-wrap').getBoundingClientRect();
+  const w = rect.width||360, h = rect.height||500;
+  data.nodes.forEach(n=>{
+    if(typeof n.x !== 'number'){ n.x = w/2 + (Math.random()-0.5)*w*0.6; n.y = h/2 + (Math.random()-0.5)*h*0.6; }
+    n.vx = n.vx||0; n.vy = n.vy||0;
+  });
+}
+
+function radiusFor(n){
+  const base = 22;
+  const extra = Math.min(16, (n.duration||20)/8);
+  return (base + extra) * forceConfig.nodeSize;
+}
+
+function simStep(w,h){
+  const nodes = data.nodes;
+  // répulsion
+  for(let i=0;i<nodes.length;i++){
+    for(let j=i+1;j<nodes.length;j++){
+      const a=nodes[i], b=nodes[j];
+      let dx=a.x-b.x, dy=a.y-b.y;
+      let dist = Math.sqrt(dx*dx+dy*dy)||0.1;
+      const minDist = radiusFor(a)+radiusFor(b)+26;
+      const force = Math.min(700, forceConfig.repelForce/(dist*dist));
+      if(dist < minDist*2.2){
+        const fx = (dx/dist)*force, fy=(dy/dist)*force;
+        a.vx += fx*0.02; a.vy += fy*0.02;
+        b.vx -= fx*0.02; b.vy -= fy*0.02;
+      }
+    }
+  }
+  // liens (ressort)
+  data.links.forEach(l=>{
+    const a = nodes.find(n=>n.id===l.from), b = nodes.find(n=>n.id===l.to);
+    if(!a||!b) return;
+    let dx=b.x-a.x, dy=b.y-a.y;
+    let dist = Math.sqrt(dx*dx+dy*dy)||0.1;
+    const f = (dist-forceConfig.linkDistance)*forceConfig.linkForce;
+    const fx=(dx/dist)*f, fy=(dy/dist)*f;
+    a.vx+=fx; a.vy+=fy; b.vx-=fx; b.vy-=fy;
+  });
+  // écartement des tâches "sœurs" : deux tâches qui partagent un voisin commun
+  // (même parent) mais ne sont pas reliées entre elles doivent rester espacées,
+  // même si les autres réglages de forces sont doux
+  const neighborMap = {};
+  data.links.forEach(l=>{
+    (neighborMap[l.from] = neighborMap[l.from]||new Set()).add(l.to);
+    (neighborMap[l.to] = neighborMap[l.to]||new Set()).add(l.from);
+  });
+  if(forceConfig.siblingSpacing > 0){
+    for(let i=0;i<nodes.length;i++){
+      for(let j=i+1;j<nodes.length;j++){
+        const a=nodes[i], b=nodes[j];
+        const na = neighborMap[a.id], nb = neighborMap[b.id];
+        if(!na || !nb || na.has(b.id)) continue; // pas de voisins, ou déjà liées directement
+        let shared = 0;
+        na.forEach(id=>{ if(nb.has(id)) shared++; });
+        if(shared===0) continue;
+        let dx=a.x-b.x, dy=a.y-b.y;
+        let dist = Math.sqrt(dx*dx+dy*dy)||0.1;
+        const target = radiusFor(a)+radiusFor(b)+forceConfig.siblingSpacing;
+        if(dist < target){
+          const f = (target-dist)*0.035*Math.min(shared,3);
+          const fx=(dx/dist)*f, fy=(dy/dist)*f;
+          a.vx += fx; a.vy += fy;
+          b.vx -= fx; b.vy -= fy;
+        }
+      }
+    }
+  }
+  // cohésion de domaine
+  const groups = {};
+  nodes.forEach(n=>{ (groups[n.cluster]=groups[n.cluster]||[]).push(n); });
+  Object.values(groups).forEach(g=>{
+    if(g.length<2) return;
+    let cx=0,cy=0; g.forEach(n=>{cx+=n.x;cy+=n.y;}); cx/=g.length; cy/=g.length;
+    g.forEach(n=>{
+      n.vx += (cx-n.x)*0.006;
+      n.vy += (cy-n.y)*0.006;
+    });
+  });
+  // force centrale + intégration
+  let totalSpeed = 0;
+  nodes.forEach(n=>{
+    if(n===dragNode) return;
+    n.vx += (w/2-n.x)*forceConfig.centerForce;
+    n.vy += (h/2-n.y)*forceConfig.centerForce;
+    n.vx *= 0.82; n.vy *= 0.82;
+    n.x += n.vx; n.y += n.vy;
+    totalSpeed += Math.abs(n.vx)+Math.abs(n.vy);
+  });
+  // résolution de collision — garantit qu'aucune bulle ne chevauche une autre,
+  // quels que soient les réglages de forces au-dessus (liées, même domaine, ou non)
+  for(let iter=0; iter<3; iter++){
+    for(let i=0;i<nodes.length;i++){
+      for(let j=i+1;j<nodes.length;j++){
+        const a=nodes[i], b=nodes[j];
+        let dx=b.x-a.x, dy=b.y-a.y;
+        let dist = Math.sqrt(dx*dx+dy*dy)||0.01;
+        const minDist = radiusFor(a)+radiusFor(b)+8;
+        if(dist < minDist){
+          const push = (minDist-dist)/2;
+          const nx=dx/dist, ny=dy/dist;
+          if(a!==dragNode){ a.x -= nx*push; a.y -= ny*push; }
+          if(b!==dragNode){ b.x += nx*push; b.y += ny*push; }
+        }
+      }
+    }
+  }
+  nodes.forEach(n=>{
+    if(n===dragNode) return;
+    const r = radiusFor(n);
+    n.x = Math.max(r, Math.min(w-r, n.x));
+    n.y = Math.max(r+10, Math.min(h-r, n.y));
+  });
+  return totalSpeed;
+}
+
+function renderGraph(){
+  const rect = document.getElementById('graph-wrap').getBoundingClientRect();
+  const w = rect.width||360, h = rect.height||500;
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  const visible = data.nodes.filter(n => clusterOff[n.cluster] !== true && !(hideDone && n.status==='done'));
+  const visibleIds = new Set(visible.map(n=>n.id));
+  const visLinks = data.links.filter(l=>visibleIds.has(l.from)&&visibleIds.has(l.to));
+
+  let html = '';
+  visLinks.forEach(l=>{
+    const a=data.nodes.find(n=>n.id===l.from), b=data.nodes.find(n=>n.id===l.to);
+    if(!a||!b) return;
+    html += `<line class="link-line" style="stroke-width:${forceConfig.linkWidth}px" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`;
+  });
+  visible.forEach(n=>{
+    const r = radiusFor(n);
+    const color = colorForCluster(n.cluster);
+    const done = n.status==='done';
+    const unlocked = isUnlocked(n);
+    html += `<g class="node" data-id="${n.id}" transform="translate(${n.x},${n.y})">`;
+    if(unlocked && !done){
+      html += `<circle class="node-ring" r="${r+5}" stroke="${color}"/>`;
+    }
+    html += `<circle class="node-circle" r="${r}" fill="${done?'#2C3038':color}" fill-opacity="${done?1:0.85}" stroke="${done?'#5B606A':'none'}" stroke-width="1.5"/>`;
+    const label = n.title.length>14 ? n.title.slice(0,13)+'…' : n.title;
+    html += `<text class="node-label" y="${r+15}" fill="${done?'var(--text-faint)':'var(--text)'}">${escapeHtml(label)}</text>`;
+    html += `</g>`;
+  });
+  svg.innerHTML = html;
+}
+
+function loopTick(){
+  if(!simRunning) return;
+  const rect = document.getElementById('graph-wrap').getBoundingClientRect();
+  const totalSpeed = simStep(rect.width||360, rect.height||500);
+  renderGraph();
+  if(dragNode){ quietFrames = 0; }
+  else if(totalSpeed < 0.6){ quietFrames++; } else { quietFrames = 0; }
+  if(quietFrames > 45){ simRunning = false; return; } // stabilisé : on arrête de redessiner pour laisser le tap tranquille
+  rafId = requestAnimationFrame(loopTick);
+}
+function startSim(){
+  ensurePositions();
+  quietFrames = 0;
+  if(frozen){ renderGraph(); return; }
+  if(simRunning) return;
+  simRunning = true;
+  loopTick();
+}
+function wakeSim(){
+  if(frozen) return;
+  quietFrames = 0;
+  if(!simRunning){ simRunning = true; loopTick(); }
+}
+function stopSim(){ simRunning=false; if(rafId) cancelAnimationFrame(rafId); }
+
+function svgPoint(evt){
+  const rect = svg.getBoundingClientRect();
+  const vb = svg.viewBox.baseVal;
+  const x = (evt.clientX-rect.left) * (vb.width/rect.width);
+  const y = (evt.clientY-rect.top) * (vb.height/rect.height);
+  return {x,y};
+}
+let didDrag = false;
+let pointerStart = {x:0,y:0};
+let dragPointerId = null;
+const DRAG_THRESHOLD = 7; // px en coordonnées écran, avant de considérer que c'est un glisser
+
+function onNodeDown(evt){
+  const g = evt.target.closest('.node');
+  if(!g) return;
+  evt.preventDefault();
+  const id = g.dataset.id;
+  const n = data.nodes.find(x=>x.id===id);
+  if(!n) return;
+  dragNode = n; didDrag = false;
+  pointerStart = {x:evt.clientX, y:evt.clientY};
+  dragPointerId = evt.pointerId;
+  try{ svg.setPointerCapture(evt.pointerId); }catch(e){}
+  wakeSim();
+  window.addEventListener('pointermove', onNodeMove);
+  window.addEventListener('pointerup', onNodeUp);
+  window.addEventListener('pointercancel', onNodeUp);
+}
+function onNodeMove(evt){
+  if(!dragNode) return;
+  const moved = Math.hypot(evt.clientX-pointerStart.x, evt.clientY-pointerStart.y);
+  if(!didDrag){
+    if(moved < DRAG_THRESHOLD) return; // simple jitter tactile, pas un vrai glisser
+    didDrag = true;
+    const p0 = svgPoint(evt);
+    dragOffset = {x:p0.x-dragNode.x, y:p0.y-dragNode.y};
+  }
+  const p = svgPoint(evt);
+  dragNode.x = p.x-dragOffset.x; dragNode.y = p.y-dragOffset.y;
+  dragNode.vx = 0; dragNode.vy = 0;
+  if(!simRunning) renderGraph(); // la boucle est peut-être arrêtée (stabilisée ou gelée) : on redessine quand même pendant le glisser
+}
+function onNodeUp(evt){
+  window.removeEventListener('pointermove', onNodeMove);
+  window.removeEventListener('pointerup', onNodeUp);
+  window.removeEventListener('pointercancel', onNodeUp);
+  try{ svg.releasePointerCapture(dragPointerId); }catch(e){}
+  if(dragNode && !didDrag){ openDetail(dragNode.id); }
+  if(dragNode) save();
+  dragNode = null;
+}
+svg.addEventListener('pointerdown', onNodeDown);
+
+function renderLegend(){
+  const clusters = [...new Set(data.nodes.map(n=>n.cluster))];
+  const legend = document.getElementById('legend');
+  legend.innerHTML = `<div class="legend-chip ${hideDone?'':'off'}" id="hide-done-chip" style="border-color:var(--text-faint)">
+      <span class="dot" style="background:${hideDone?'var(--accent)':'var(--text-faint)'}"></span>Terminées
+    </div>` + clusters.map(c=>{
+    const off = clusterOff[c]===true;
+    return `<div class="legend-chip ${off?'off':''}" data-cluster="${escapeAttr(c)}">
+      <span class="dot" style="background:${colorForCluster(c)}"></span>${escapeHtml(c)}
+    </div>`;
+  }).join('');
+  legend.querySelectorAll('.legend-chip[data-cluster]').forEach(chip=>{
+    let pressTimer = null, longFired = false;
+    chip.addEventListener('pointerdown', ()=>{
+      longFired = false;
+      pressTimer = setTimeout(()=>{
+        longFired = true;
+        soloCluster(chip.dataset.cluster);
+      }, 480);
+    });
+    const cancelPress = ()=>{ clearTimeout(pressTimer); };
+    chip.addEventListener('pointerup', ()=>{
+      cancelPress();
+      if(longFired) return;
+      const c = chip.dataset.cluster;
+      clusterOff[c] = !clusterOff[c];
+      renderLegend(); renderGraph();
+    });
+    chip.addEventListener('pointerleave', cancelPress);
+    chip.addEventListener('pointercancel', cancelPress);
+  });
+  const hideChip = document.getElementById('hide-done-chip');
+  if(hideChip){
+    hideChip.addEventListener('click', ()=>{
+      hideDone = !hideDone;
+      renderLegend(); renderGraph();
+    });
+  }
+}
+function soloCluster(target){
+  const clusters = [...new Set(data.nodes.map(n=>n.cluster))];
+  const isAlreadySolo = clusters.every(c => c===target ? clusterOff[c]!==true : clusterOff[c]===true);
+  if(isAlreadySolo){
+    clusterOff = {}; // long-appui de nouveau -> tout réafficher
+  }else{
+    clusterOff = {};
+    clusters.forEach(c=>{ if(c!==target) clusterOff[c] = true; });
+  }
+  renderLegend(); renderGraph();
+}
+
+// ---------------------------------------------------------------
+// MODAL — création / édition
+// ---------------------------------------------------------------
+const overlay = document.getElementById('overlay');
+const sheet = document.getElementById('sheet');
+function closeSheet(){ overlay.classList.remove('open'); sheet.innerHTML=''; sheet.style.opacity='1'; }
+overlay.addEventListener('click', e=>{ if(e.target===overlay) closeSheet(); });
+
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function escapeAttr(s){ return escapeHtml(s); }
+
+function openEditForm(existing){
+  const isNew = !existing;
+  const node = existing || {id:uid(), title:'', cluster:'', duration:'', energy:'medium', deadline:'', status:'todo', pinnedDate:null};
+  const clusters = [...new Set(data.nodes.map(n=>n.cluster))];
+  const others = data.nodes.filter(n=>n.id!==node.id).sort((a,b)=>{
+    const aSame = a.cluster===node.cluster ? 0 : 1;
+    const bSame = b.cluster===node.cluster ? 0 : 1;
+    if(aSame!==bSame) return aSame-bSame; // le domaine en cours d'abord
+    return (a.cluster||'').localeCompare(b.cluster||'') || a.title.localeCompare(b.title);
+  });
+  const currentDeps = new Set(data.links.filter(l=>l.to===node.id).map(l=>l.from));
+  const currentRequiredFor = new Set(data.links.filter(l=>l.from===node.id).map(l=>l.to));
+
+  function depListHtml(attr, checkedSet){
+    return others.map(o=>`<label class="dep-item" style="margin:0;">
+        <input type="checkbox" data-${attr}="${o.id}" ${checkedSet.has(o.id)?'checked':''}>
+        <span style="color:${colorForCluster(o.cluster)}">${escapeHtml(o.title)}</span>
+      </label>`).join('');
+  }
+
+  sheet.innerHTML = `
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">${isNew?'Nouvelle tâche':'Modifier la tâche'}</div>
+    <label>Titre</label>
+    <input type="text" id="f-title" value="${escapeAttr(node.title)}" placeholder="Ex : Exporter les visuels VJ">
+    <label>Domaine</label>
+    <input type="text" id="f-cluster" list="cluster-list" value="${escapeAttr(node.cluster)}" placeholder="Ex : VJ, Game dev, Réparation…">
+    <datalist id="cluster-list">${clusters.map(c=>`<option value="${escapeAttr(c)}">`).join('')}</datalist>
+    <div class="row2">
+      <div>
+        <label>Durée estimée</label>
+        <input type="text" id="f-duration" value="${formatDurationForInput(node.duration)}" placeholder="35 ou 1h30" inputmode="text">
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Un nombre seul = minutes. Sinon écris "1h30", "2h"…</div>
+      </div>
+      <div>
+        <label>Énergie requise</label>
+        <select id="f-energy">
+          <option value="low" ${node.energy==='low'?'selected':''}>Basse</option>
+          <option value="medium" ${node.energy==='medium'?'selected':''}>Moyenne</option>
+          <option value="high" ${node.energy==='high'?'selected':''}>Haute</option>
+        </select>
+      </div>
+    </div>
+    <label>Échéance (optionnel)</label>
+    <input type="date" id="f-deadline" value="${node.deadline||''}">
+    ${others.length? `<label>Dépend de <span style="font-weight:400;color:var(--text-faint);">(à faire avant celle-ci)</span></label>
+    <div class="dep-list">${depListHtml('dep', currentDeps)}</div>
+    <label>Nécessaire pour <span style="font-weight:400;color:var(--text-faint);">(celle-ci doit être faite avant)</span></label>
+    <div class="dep-list">${depListHtml('reqfor', currentRequiredFor)}</div>
+    ` : ''}
+    <div class="sheet-actions">
+      ${!isNew? `<button class="btn-delete" id="f-delete">Supprimer</button>`:''}
+      <button class="btn-cancel" id="f-cancel">Annuler</button>
+      <button class="btn-save" id="f-save">Enregistrer</button>
+    </div>
+  `;
+  overlay.classList.add('open');
+  document.getElementById('f-cancel').addEventListener('click', closeSheet);
+
+  // une tâche ne peut pas à la fois dépendre de X et être nécessaire à X (ça créerait une boucle)
+  others.forEach(o=>{
+    const depCb = sheet.querySelector(`[data-dep="${o.id}"]`);
+    const reqCb = sheet.querySelector(`[data-reqfor="${o.id}"]`);
+    if(!depCb || !reqCb) return;
+    reqCb.disabled = depCb.checked;
+    depCb.disabled = reqCb.checked;
+    depCb.addEventListener('change', ()=>{ reqCb.disabled = depCb.checked; });
+    reqCb.addEventListener('change', ()=>{ depCb.disabled = reqCb.checked; });
+  });
+
+  if(!isNew){
+    document.getElementById('f-delete').addEventListener('click', ()=>{
+      if(!confirm(`Supprimer définitivement « ${node.title} » ?`)) return;
+      data.nodes = data.nodes.filter(n=>n.id!==node.id);
+      data.links = data.links.filter(l=>l.from!==node.id && l.to!==node.id);
+      save(); closeSheet(); refreshAll();
+    });
+  }
+  document.getElementById('f-save').addEventListener('click', ()=>{
+    const title = document.getElementById('f-title').value.trim();
+    const cluster = document.getElementById('f-cluster').value.trim() || 'Sans domaine';
+    if(!title) return;
+    node.title = title;
+    node.cluster = cluster;
+    node.duration = parseDurationInput(document.getElementById('f-duration').value);
+    node.energy = document.getElementById('f-energy').value;
+    node.deadline = document.getElementById('f-deadline').value || null;
+    colorForCluster(cluster);
+    if(isNew) data.nodes.push(node);
+    // reconstruit tous les liens touchant cette tâche, dans les deux sens
+    data.links = data.links.filter(l=>l.to!==node.id && l.from!==node.id);
+    sheet.querySelectorAll('[data-dep]:checked').forEach(cb=>{
+      data.links.push({from: cb.dataset.dep, to: node.id});
+    });
+    sheet.querySelectorAll('[data-reqfor]:checked').forEach(cb=>{
+      data.links.push({from: node.id, to: cb.dataset.reqfor});
+    });
+    save(); closeSheet(); refreshAll();
+  });
+}
+
+function openDetail(id){
+  const n = data.nodes.find(x=>x.id===id);
+  if(!n) return;
+  const color = colorForCluster(n.cluster);
+  const pinnedToday = n.pinnedDate === todayISO();
+  sheet.innerHTML = `
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+      <span class="cluster-dot" style="background:${color}"></span>
+      <span style="font-size:12.5px;color:var(--text-dim)">${escapeHtml(n.cluster)}</span>
+    </div>
+    <div class="sheet-title" style="margin-bottom:4px;">${escapeHtml(n.title)}</div>
+    <div style="font-size:13px;color:var(--text-dim);">
+      ${n.duration? formatDuration(n.duration):'durée non estimée'}
+      ${n.deadline? ` · échéance ${new Date(n.deadline).toLocaleDateString('fr-FR')}`:''}
+    </div>
+    <div class="detail-row">
+      <button class="btn-primary" id="d-pin">${pinnedToday? "Retirer d'aujourd'hui" : "Épingler à aujourd'hui"}</button>
+    </div>
+    <div class="detail-row">
+      <button class="btn-secondary" id="d-done">${n.status==='done'?'Marquer à refaire':'Marquer comme fait'}</button>
+      <button class="btn-secondary" id="d-edit">Modifier</button>
+    </div>
+  `;
+  overlay.classList.add('open');
+  document.getElementById('d-pin').addEventListener('click', ()=>{
+    n.pinnedDate = pinnedToday ? null : todayISO();
+    save(); closeSheet();
+  });
+  document.getElementById('d-done').addEventListener('click', ()=>{
+    const becomingDone = n.status !== 'done';
+    n.status = becomingDone ? 'done' : 'todo';
+    save(); closeSheet(); refreshAll();
+    if(becomingDone){ celebrateSmall(null); checkAllDoneToday(); }
+  });
+  document.getElementById('d-edit').addEventListener('click', ()=>{ openEditForm(n); });
+}
+
+document.getElementById('fab').addEventListener('click', ()=>openEditForm(null));
+
+// ---------------------------------------------------------------
+// RÉGLAGES — export / import / domaines
+// ---------------------------------------------------------------
+function openSettings(){
+  const clusters = [...new Set(data.nodes.map(n=>n.cluster))];
+  const json = JSON.stringify(data, null, 2);
+  sheet.innerHTML = `
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Réglages</div>
+
+    <label style="margin-top:0;">Domaines</label>
+    <div id="domains-list" style="display:flex;flex-direction:column;gap:8px;">
+      ${clusters.length? clusters.map(c=>`
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="color" data-color-for="${escapeAttr(c)}" value="${colorForCluster(c)}" style="width:34px;height:34px;padding:0;border:1px solid var(--line);border-radius:8px;background:none;flex-shrink:0;">
+          <input type="text" data-rename-from="${escapeAttr(c)}" value="${escapeAttr(c)}" style="flex:1;">
+        </div>`).join('') : '<div style="font-size:13px;color:var(--text-faint);">Pas encore de domaine.</div>'}
+    </div>
+
+    <label>Exporter</label>
+    <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px;">Garde ce fichier ou ce texte quelque part avant toute grosse modification.</div>
+    <div class="sheet-actions" style="margin-top:0;">
+      <button class="btn-secondary" id="s-download">Télécharger le fichier</button>
+      <button class="btn-secondary" id="s-copy">Copier le texte</button>
+    </div>
+    <textarea id="s-export-area" readonly style="width:100%;height:90px;margin-top:10px;background:var(--panel-raised);border:1px solid var(--line);border-radius:10px;color:var(--text-faint);font-size:11px;padding:8px;font-family:monospace;">${escapeHtml(json)}</textarea>
+
+    <label>Importer / restaurer</label>
+    <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px;">Remplace toutes les données actuelles par celles importées.</div>
+    <input type="file" id="s-file" accept="application/json" style="font-size:12.5px;color:var(--text-dim);">
+    <textarea id="s-import-area" placeholder="…ou colle ici le texte exporté" style="width:100%;height:70px;margin-top:10px;background:var(--panel-raised);border:1px solid var(--line);border-radius:10px;color:var(--text);font-size:12px;padding:8px;font-family:monospace;"></textarea>
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="s-cancel">Fermer</button>
+      <button class="btn-save" id="s-import-btn">Charger</button>
+    </div>
+  `;
+  overlay.classList.add('open');
+
+  sheet.querySelectorAll('[data-color-for]').forEach(inp=>{
+    inp.addEventListener('input', ()=>{
+      data.clusterColors[inp.dataset.colorFor] = inp.value;
+      save(); renderGraph(); renderLegend();
+    });
+  });
+  sheet.querySelectorAll('[data-rename-from]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      const oldName = inp.dataset.renameFrom;
+      const newName = inp.value.trim();
+      if(!newName || newName===oldName) { inp.value = oldName; return; }
+      data.nodes.forEach(n=>{ if(n.cluster===oldName) n.cluster = newName; });
+      const col = data.clusterColors[oldName];
+      delete data.clusterColors[oldName];
+      if(!data.clusterColors[newName]) data.clusterColors[newName] = col;
+      save(); refreshAll();
+      openSettings(); // rafraîchit la liste avec le nouveau nom
+    });
+  });
+
+  document.getElementById('s-download').addEventListener('click', ()=>{
+    const blob = new Blob([json], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'reseau-taches-'+todayISO()+'.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+  document.getElementById('s-copy').addEventListener('click', async ()=>{
+    const area = document.getElementById('s-export-area');
+    try{ await navigator.clipboard.writeText(area.value); }
+    catch(e){ area.focus(); area.select(); document.execCommand('copy'); }
+  });
+  document.getElementById('s-file').addEventListener('change', e=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{ document.getElementById('s-import-area').value = reader.result; };
+    reader.readAsText(file);
+  });
+  document.getElementById('s-cancel').addEventListener('click', closeSheet);
+  document.getElementById('s-import-btn').addEventListener('click', ()=>{
+    const raw = document.getElementById('s-import-area').value.trim();
+    if(!raw) return;
+    let parsed;
+    try{ parsed = JSON.parse(raw); }
+    catch(e){ alert('Ce texte ne ressemble pas à un export valide.'); return; }
+    if(!confirm('Remplacer toutes les données actuelles par ce fichier importé ?')) return;
+    data = Object.assign({nodes:[],links:[],clusterColors:{}}, parsed);
+    save(); closeSheet(); refreshAll();
+  });
+}
+document.getElementById('settings-btn').addEventListener('click', openSettings);
+
+// ---------------------------------------------------------------
+// FIGER LES FORCES
+// ---------------------------------------------------------------
+const freezeBtn = document.getElementById('freeze-btn');
+function applyFreezeVisual(){
+  freezeBtn.style.color = frozen ? 'var(--accent)' : 'var(--text-dim)';
+}
+freezeBtn.addEventListener('click', ()=>{
+  frozen = !frozen;
+  data.settings = data.settings || {};
+  data.settings.frozen = frozen;
+  save();
+  applyFreezeVisual();
+  if(frozen) stopSim(); else wakeSim();
+});
+applyFreezeVisual();
+
+// ---------------------------------------------------------------
+// RÉGLAGES DES FORCES (sliders type Obsidian)
+// ---------------------------------------------------------------
+function sliderRow(label, key, value, min, max, step){
+  return `<label style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;">
+    <span>${label}</span><span style="color:var(--text-faint);font-size:12px;" id="val-${key}">${value}</span>
+  </label>
+  <input type="range" data-force="${key}" min="${min}" max="${max}" step="${step}" value="${value}" style="width:100%;accent-color:var(--accent);margin-top:6px;">`;
+}
+function openForces(){
+  sheet.style.opacity = '1';
+  sheet.style.transition = 'opacity 0.15s ease';
+  sheet.innerHTML = `
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Forces du graphe</div>
+    <div style="font-size:12px;color:var(--text-faint);margin-top:-10px;margin-bottom:4px;">Le panneau s'estompe pendant que tu bouges un curseur, pour voir l'effet derrière.</div>
+    ${sliderRow('Taille des nœuds','nodeSize',forceConfig.nodeSize,0.6,1.8,0.05)}
+    ${sliderRow('Épaisseur des liens','linkWidth',forceConfig.linkWidth,0.5,4,0.25)}
+    ${sliderRow('Force centrale','centerForce',forceConfig.centerForce,0,0.004,0.0002)}
+    ${sliderRow('Force de répulsion','repelForce',forceConfig.repelForce,500,8000,100)}
+    ${sliderRow('Force de liaison','linkForce',forceConfig.linkForce,0.005,0.08,0.005)}
+    ${sliderRow('Distance des liens','linkDistance',forceConfig.linkDistance,40,220,10)}
+    ${sliderRow('Écart entre tâches sœurs','siblingSpacing',forceConfig.siblingSpacing,0,160,10)}
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="fc-reset">Réinitialiser</button>
+      <button class="btn-save" id="fc-close">Fermer</button>
+    </div>
+  `;
+  overlay.classList.add('open');
+  sheet.querySelectorAll('[data-force]').forEach(inp=>{
+    inp.addEventListener('input', ()=>{
+      sheet.style.opacity = '0.22';
+      const key = inp.dataset.force;
+      forceConfig[key] = parseFloat(inp.value);
+      document.getElementById('val-'+key).textContent = inp.value;
+      data.settings = data.settings || {};
+      data.settings.forceConfig = forceConfig;
+      save();
+      if(frozen) renderGraph(); else wakeSim();
+    });
+    const restoreOpacity = ()=>{ sheet.style.opacity = '1'; };
+    inp.addEventListener('change', restoreOpacity);
+    inp.addEventListener('pointerup', restoreOpacity);
+    inp.addEventListener('touchend', restoreOpacity);
+  });
+  document.getElementById('fc-reset').addEventListener('click', ()=>{
+    forceConfig = Object.assign({}, FORCE_DEFAULTS);
+    data.settings = data.settings || {};
+    data.settings.forceConfig = forceConfig;
+    save();
+    if(frozen) renderGraph(); else wakeSim();
+    openForces();
+  });
+  document.getElementById('fc-close').addEventListener('click', closeSheet);
+}
+document.getElementById('forces-btn').addEventListener('click', openForces);
+
+// ---------------------------------------------------------------
+// DÉCIDER
+// ---------------------------------------------------------------
+const timeOptions = [{v:15,l:'15 min'},{v:30,l:'30 min'},{v:60,l:'1 h'},{v:999,l:'2 h ou +'}];
+const energyOptions = [{v:'low',l:'Basse'},{v:'medium',l:'Moyenne'},{v:'high',l:'Haute'}];
+let selTime = 30, selEnergy = 'medium';
+
+function renderPills(){
+  document.getElementById('time-pills').innerHTML = timeOptions.map(o=>
+    `<button class="pill ${selTime===o.v?'selected':''}" data-time="${o.v}">${o.l}</button>`).join('');
+  document.getElementById('energy-pills').innerHTML = energyOptions.map(o=>
+    `<button class="pill ${selEnergy===o.v?'selected':''}" data-energy="${o.v}">${o.l}</button>`).join('');
+  document.querySelectorAll('[data-time]').forEach(b=>b.addEventListener('click', ()=>{ selTime=parseInt(b.dataset.time); renderPills(); }));
+  document.querySelectorAll('[data-energy]').forEach(b=>b.addEventListener('click', ()=>{ selEnergy=b.dataset.energy; renderPills(); }));
+}
+const energyRank = {low:1, medium:2, high:3};
+let lastSuggestionId = null;
+
+function candidatesFiltered(){
+  return data.nodes.filter(n=>{
+    if(!isUnlocked(n)) return false;
+    if(n.duration && n.duration > selTime) return false;
+    if(energyRank[n.energy||'medium'] > energyRank[selEnergy]) return false;
+    return true;
+  }).sort((a,b)=>{
+    const da = a.deadline ? new Date(a.deadline).getTime() : Infinity;
+    const db = b.deadline ? new Date(b.deadline).getTime() : Infinity;
+    return da-db;
+  });
+}
+function candidatesRandom(){
+  return data.nodes.filter(isUnlocked);
+}
+
+function renderResult(candidates, regenerate, emptyMsg){
+  const resultDiv = document.getElementById('decide-result');
+  if(!candidates.length){
+    resultDiv.innerHTML = `<div class="decide-empty">${emptyMsg}</div>`;
+    return;
+  }
+  const pool = candidates.filter(c=>c.id!==lastSuggestionId);
+  const pick = (pool.length? pool : candidates)[Math.floor(Math.random()*(pool.length?pool.length:candidates.length))];
+  lastSuggestionId = pick.id;
+  const color = colorForCluster(pick.cluster);
+  resultDiv.innerHTML = `
+    <div class="result-card">
+      <div class="result-cluster" style="color:${color}">${escapeHtml(pick.cluster)}</div>
+      <div class="result-title">${escapeHtml(pick.title)}</div>
+      <div class="result-meta">${pick.duration? formatDuration(pick.duration)+' · ':''}énergie ${energyOptions.find(e=>e.v===(pick.energy||'medium')).l.toLowerCase()}${pick.deadline? ' · échéance '+new Date(pick.deadline).toLocaleDateString('fr-FR'):''}</div>
+      <div class="result-actions">
+        <button class="btn-secondary" id="r-other">Autre idée</button>
+        <button class="btn-primary" id="r-go">Je fais ça</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('r-other').addEventListener('click', regenerate);
+  document.getElementById('r-go').addEventListener('click', ()=>{
+    pick.pinnedDate = todayISO();
+    save();
+    resultDiv.innerHTML += `<div style="margin-top:10px;font-size:13px;color:var(--text-dim)">Épinglé à aujourd'hui.</div>`;
+  });
+}
+function suggest(){
+  renderResult(candidatesFiltered(), suggest, "Rien ne correspond à ces critères pour l'instant. Élargis le temps ou l'énergie, ou ajoute des tâches dans le Réseau.");
+}
+function suggestRandom(){
+  renderResult(candidatesRandom(), suggestRandom, "Aucune tâche débloquée pour l'instant (une tâche est débloquée quand tout ce dont elle dépend est fait).");
+}
+document.getElementById('decide-btn').addEventListener('click', suggest);
+document.getElementById('decide-random-btn').addEventListener('click', suggestRandom);
+
+// ---------------------------------------------------------------
+// INIT
+// ---------------------------------------------------------------
+function refreshAll(){
+  renderToday();
+  renderLegend();
+  ensurePositions();
+  if(document.getElementById('graph-view').classList.contains('active')){
+    wakeSim();
+  }else{
+    renderGraph();
+  }
+}
+
+(async function init(){
+  await loadData();
+  if(data.settings){
+    if(data.settings.forceConfig) forceConfig = Object.assign({}, FORCE_DEFAULTS, data.settings.forceConfig);
+    frozen = !!data.settings.frozen;
+  }
+  applyFreezeVisual();
+  renderPills();
+  refreshAll();
+})();
+
+})();
+</script>
+</body>
+</html>
