@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>Aujourd'hui</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #14171C; --panel: #1B1F26; --text: #E8E6E1;
+    --text-dim: #8A8F98; --text-faint: #5B606A; --line: #2C3038;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; }
+  body{
+    font-family:'Inter',system-ui,-apple-system,sans-serif;
+    background:var(--bg); color:var(--text);
+    padding:16px 16px 12px; min-height:100vh;
+  }
+  h1{ font-size:15px; font-weight:600; margin:0 0 2px; }
+  .date{ font-size:11px; color:var(--text-dim); margin-bottom:12px; }
+  .row{ display:flex; align-items:center; gap:9px; padding:8px 0; border-bottom:1px solid var(--line); }
+  .row:last-of-type{ border-bottom:none; }
+  .row.done{ opacity:0.4; }
+  .dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .title{ font-size:13.5px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row.done .title{ text-decoration:line-through; }
+  .dur{ font-size:11px; color:var(--text-faint); flex-shrink:0; }
+  .empty{ color:var(--text-dim); font-size:13px; padding:20px 0; }
+  .err{ color:var(--text-dim); font-size:12px; padding:20px 0; line-height:1.5; }
+  .openlink{
+    display:block; text-align:center; margin-top:16px; padding:10px;
+    border:1px solid var(--line); border-radius:10px; color:var(--text-dim);
+    text-decoration:none; font-size:12.5px;
+  }
+</style>
+</head>
+<body>
+  <h1>Aujourd'hui</h1>
+  <div class="date" id="date"></div>
+  <div id="list"><div class="empty">Chargement…</div></div>
+  <a class="openlink" href="index.html">Ouvrir l'app complète</a>
+
+<script>
+function formatDuration(min){
+  if(!min) return '';
+  if(min<60) return min+' min';
+  const h=Math.floor(min/60), r=min%60;
+  return r? `${h}h${String(r).padStart(2,'0')}` : `${h}h`;
+}
+function todayISO(){
+  const d=new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+(async function(){
+  const params = new URLSearchParams(location.search);
+  const id = params.get('id'), key = params.get('key');
+  document.getElementById('date').textContent = new Date().toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
+  const list = document.getElementById('list');
+  if(!id || !key){
+    list.innerHTML = '<div class="err">Lien incomplet — recopie l\'adresse depuis Réglages dans l\'app.</div>';
+    return;
+  }
+  try{
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media&key=${key}`);
+    if(!res.ok) throw new Error('http '+res.status);
+    const data = await res.json();
+    const clusterColors = data.clusterColors || {};
+    const today = todayISO();
+    const items = (data.nodes||[]).filter(n=>n.pinnedDate===today);
+    if(!items.length){
+      list.innerHTML = '<div class="empty">Rien d\'épinglé pour aujourd\'hui.</div>';
+      return;
+    }
+    items.sort((a,b)=> (a.status==='done')-(b.status==='done'));
+    list.innerHTML = items.map(n=>{
+      const color = clusterColors[n.cluster] || '#8A8F98';
+      return `<div class="row ${n.status==='done'?'done':''}">
+        <span class="dot" style="background:${color}"></span>
+        <span class="title">${escapeHtml(n.title)}</span>
+        ${n.duration? `<span class="dur">${formatDuration(n.duration)}</span>`:''}
+      </div>`;
+    }).join('');
+  }catch(e){
+    list.innerHTML = '<div class="err">Lecture impossible pour le moment. Vérifie que le fichier est bien partagé "lecture par lien", ou ouvre l\'app complète.</div>';
+  }
+})();
+</script>
+</body>
+</html>
