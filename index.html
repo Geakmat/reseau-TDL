@@ -66,9 +66,43 @@
   nav.tabs button.active .dot{ opacity:1; }
 
   /* ---------- FAB ---------- */
+  /* ---------- Barre de lieu ---------- */
+  #location-bar{
+    width:100%; background:var(--panel); border:none; border-top:1px solid var(--line);
+    color:var(--text-dim); padding:9px 18px; font-family:inherit; font-size:12.5px;
+    text-align:left; display:flex; align-items:center; gap:7px; cursor:pointer; flex-shrink:0;
+  }
+  #location-bar b{ color:var(--text); font-weight:500; }
+
+  /* ---------- Calendrier ---------- */
+  #calendar-view .content{ flex:1; overflow-y:auto; padding: 4px 16px 90px; }
+  .cal-nav{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+  .cal-nav button{ background:var(--panel); border:1px solid var(--line); color:var(--text); width:34px; height:34px; border-radius:9px; font-size:16px; font-family:inherit; }
+  .cal-month-label{ font-size:14.5px; font-weight:600; text-transform:capitalize; }
+  .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:5px; margin-bottom:18px; }
+  .cal-weekday{ text-align:center; font-size:10.5px; color:var(--text-faint); padding-bottom:4px; }
+  .cal-cell{
+    aspect-ratio:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    border-radius:10px; background:var(--panel); font-size:12.5px; color:var(--text-dim);
+    border:1px solid transparent; font-family:inherit; padding:0;
+  }
+  .cal-cell.empty{ background:none; visibility:hidden; }
+  .cal-cell.today{ border-color:var(--text-faint); color:var(--text); }
+  .cal-cell.selected{ background:var(--accent-soft); border-color:var(--accent); color:var(--text); }
+  .cal-cell .cal-dot{ width:5px; height:5px; border-radius:50%; background:var(--accent); margin-top:3px; }
+  .cal-day-title{ font-size:13px; color:var(--text-dim); margin-bottom:8px; }
+
+  /* ---------- Réglages du panneau lieu ---------- */
+  .loc-chip{
+    display:inline-flex; align-items:center; padding:9px 14px; border-radius:20px;
+    border:1px solid var(--line); background:var(--panel-raised); color:var(--text);
+    font-size:13.5px; margin:0 6px 6px 0; cursor:pointer;
+  }
+  .loc-chip.selected{ background:var(--accent-soft); border-color:var(--accent); }
+
   .fab{
     position:absolute; right:18px;
-    bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(120px + env(safe-area-inset-bottom, 0px));
     width:52px; height:52px; border-radius:50%;
     background: var(--accent); color:#12160F;
     border:none; font-size:26px; font-weight:400;
@@ -261,8 +295,30 @@
     </div>
   </div>
 
+  <!-- ===== CALENDRIER ===== -->
+  <div class="view" id="calendar-view">
+    <div class="topbar"><div><h1>Calendrier</h1><div class="sub">Touche un jour pour voir ou déplacer ce qui y est prévu</div></div></div>
+    <div class="content">
+      <div class="cal-nav">
+        <button id="cal-prev">‹</button>
+        <div class="cal-month-label" id="cal-month-label"></div>
+        <button id="cal-next">›</button>
+      </div>
+      <div class="cal-grid" id="cal-weekdays">
+        <div class="cal-weekday">L</div><div class="cal-weekday">M</div><div class="cal-weekday">M</div>
+        <div class="cal-weekday">J</div><div class="cal-weekday">V</div><div class="cal-weekday">S</div><div class="cal-weekday">D</div>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+      <div class="cal-day-title" id="cal-day-title"></div>
+      <div id="cal-day-list"></div>
+    </div>
+  </div>
+
   <!-- ===== FAB ===== -->
   <button class="fab" id="fab">+</button>
+
+  <!-- ===== BARRE DE LIEU ===== -->
+  <button id="location-bar"><span>📍</span><span id="location-label">Partout</span></button>
 
   <!-- ===== BOTTOM NAV ===== -->
   <nav class="tabs">
@@ -277,6 +333,10 @@
     <button data-view="decide-view">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/></svg>
       Décider<span class="dot"></span>
+    </button>
+    <button data-view="calendar-view">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3.5" y="5" width="17" height="15" rx="2.2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/></svg>
+      Calendrier<span class="dot"></span>
     </button>
   </nav>
 </div>
@@ -498,6 +558,7 @@ navBtns.forEach(btn=>{
     if(btn.dataset.view==='graph-view'){ renderLegend(); startSim(); }
     else stopSim();
     if(btn.dataset.view==='decide-view'){ document.getElementById('decide-result').innerHTML=''; }
+    if(btn.dataset.view==='calendar-view'){ renderCalendar(); renderCalDayList(); }
   });
 });
 
@@ -577,6 +638,65 @@ function checkAllDoneToday(){
 }
 
 // ---------------------------------------------------------------
+// LIEU
+// ---------------------------------------------------------------
+function currentLocation(){ return (data.settings && data.settings.currentLocation) || ''; }
+function showOtherLocations(){ return !!(data.settings && data.settings.showOtherLocations); }
+// une tâche sans lieu est toujours disponible ; sans lieu actuel défini, rien n'est filtré
+function taskAtCurrentLocation(n){
+  const cur = currentLocation();
+  return !n.location || !cur || n.location === cur;
+}
+function updateLocationBar(){
+  const label = document.getElementById('location-label');
+  const loc = currentLocation();
+  label.innerHTML = loc ? `<b>${escapeHtml(loc)}</b>` : 'Partout';
+}
+function openLocationPicker(){
+  const locations = [...new Set(data.nodes.map(n=>n.location).filter(Boolean))];
+  const cur = currentLocation();
+  sheet.innerHTML = `
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Je suis à…</div>
+    <div style="margin-bottom:6px;">
+      <button class="loc-chip ${!cur?'selected':''}" data-loc="">Partout</button>
+      ${locations.map(l=>`<button class="loc-chip ${l===cur?'selected':''}" data-loc="${escapeAttr(l)}">${escapeHtml(l)}</button>`).join('')}
+    </div>
+    <label>Nouveau lieu</label>
+    <div style="display:flex;gap:8px;">
+      <input type="text" id="loc-new" placeholder="Ex : Chez ma mère" style="flex:1;">
+      <button class="btn-secondary" id="loc-add" style="flex-shrink:0;">Ajouter</button>
+    </div>
+    <label style="display:flex;align-items:center;gap:9px;margin-top:20px;cursor:pointer;">
+      <input type="checkbox" id="loc-show-other" ${showOtherLocations()?'checked':''} style="width:17px;height:17px;">
+      <span style="font-size:13.5px;color:var(--text);">Afficher aussi les tâches d'un autre lieu (grisées) dans le Réseau</span>
+    </label>
+    <div class="sheet-actions"><button class="btn-save" id="loc-close" style="width:100%;">Fermer</button></div>
+  `;
+  overlay.classList.add('open');
+  function selectLocation(loc){
+    data.settings = data.settings || {};
+    data.settings.currentLocation = loc;
+    save(); updateLocationBar(); refreshAll();
+  }
+  sheet.querySelectorAll('[data-loc]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ selectLocation(btn.dataset.loc); closeSheet(); });
+  });
+  document.getElementById('loc-add').addEventListener('click', ()=>{
+    const v = document.getElementById('loc-new').value.trim();
+    if(!v) return;
+    selectLocation(v); closeSheet();
+  });
+  document.getElementById('loc-show-other').addEventListener('change', (e)=>{
+    data.settings = data.settings || {};
+    data.settings.showOtherLocations = e.target.checked;
+    save(); refreshAll();
+  });
+  document.getElementById('loc-close').addEventListener('click', closeSheet);
+}
+document.getElementById('location-bar').addEventListener('click', openLocationPicker);
+
+// ---------------------------------------------------------------
 // AUJOURD'HUI
 // ---------------------------------------------------------------
 function renderToday(){
@@ -598,7 +718,7 @@ function renderToday(){
       <button class="check ${n.status==='done'?'checked':''}" data-action="toggle" data-id="${n.id}">
         <svg viewBox="0 0 24 24" fill="none" stroke="#12160F" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg>
       </button>
-      <div class="task-main">
+      <div class="task-main" data-action="open" data-id="${n.id}">
         <div class="task-title">${escapeHtml(n.title)}</div>
         <div class="task-meta">
           <span class="cluster-dot" style="background:${color}"></span>
@@ -610,10 +730,12 @@ function renderToday(){
     </div>`;
   }).join('');
 
+  list.querySelectorAll('[data-action=open]').forEach(el=>el.addEventListener('click', ()=>openDetail(el.dataset.id)));
   list.querySelectorAll('[data-action=toggle]').forEach(b=>b.addEventListener('click', e=>{
     const n = data.nodes.find(x=>x.id===b.dataset.id);
     const becomingDone = n.status !== 'done';
     n.status = becomingDone ? 'done' : 'todo';
+    n.completedDate = becomingDone ? todayISO() : null;
     save();
     if(becomingDone){
       b.classList.add('checked');
@@ -767,7 +889,13 @@ function renderGraph(){
   const rect = document.getElementById('graph-wrap').getBoundingClientRect();
   const w = rect.width||360, h = rect.height||500;
   svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
-  const visible = data.nodes.filter(n => clusterOff[n.cluster] !== true && !(hideDone && n.status==='done'));
+  const showOther = showOtherLocations();
+  const visible = data.nodes.filter(n => {
+    if(clusterOff[n.cluster] === true) return false;
+    if(hideDone && n.status==='done') return false;
+    if(!taskAtCurrentLocation(n) && !showOther) return false;
+    return true;
+  });
   const visibleIds = new Set(visible.map(n=>n.id));
   const visLinks = data.links.filter(l=>visibleIds.has(l.from)&&visibleIds.has(l.to));
 
@@ -782,13 +910,16 @@ function renderGraph(){
     const color = colorForCluster(n.cluster);
     const done = n.status==='done';
     const unlocked = isUnlocked(n);
+    const awayLoc = !taskAtCurrentLocation(n);
     html += `<g class="node" data-id="${n.id}" transform="translate(${n.x},${n.y})">`;
-    if(unlocked && !done){
+    if(unlocked && !done && !awayLoc){
       html += `<circle class="node-ring" r="${r+5}" stroke="${color}"/>`;
     }
-    html += `<circle class="node-circle" r="${r}" fill="${done?'#2C3038':color}" fill-opacity="${done?1:0.85}" stroke="${done?'#5B606A':'none'}" stroke-width="1.5"/>`;
+    const fill = done ? '#2C3038' : color;
+    const fillOpacity = done ? 1 : (awayLoc ? 0.32 : 0.85);
+    html += `<circle class="node-circle" r="${r}" fill="${fill}" fill-opacity="${fillOpacity}" stroke="${done?'#5B606A':(awayLoc?'#5B606A':'none')}" stroke-dasharray="${awayLoc&&!done?'3,3':'none'}" stroke-width="1.5"/>`;
     const label = n.title.length>14 ? n.title.slice(0,13)+'…' : n.title;
-    html += `<text class="node-label" y="${r+15}" fill="${done?'var(--text-faint)':'var(--text)'}">${escapeHtml(label)}</text>`;
+    html += `<text class="node-label" y="${r+15}" fill="${done||awayLoc?'var(--text-faint)':'var(--text)'}">${escapeHtml(label)}</text>`;
     html += `</g>`;
   });
   svg.innerHTML = html;
@@ -936,8 +1067,9 @@ function escapeAttr(s){ return escapeHtml(s); }
 
 function openEditForm(existing){
   const isNew = !existing;
-  const node = existing || {id:uid(), title:'', cluster:'', duration:'', energy:'medium', deadline:'', status:'todo', pinnedDate:null};
+  const node = existing || {id:uid(), title:'', cluster:'', duration:'', energy:'medium', deadline:'', status:'todo', pinnedDate:null, location:''};
   const clusters = [...new Set(data.nodes.map(n=>n.cluster))];
+  const locations = [...new Set(data.nodes.map(n=>n.location).filter(Boolean))];
   const others = data.nodes.filter(n=>n.id!==node.id).sort((a,b)=>{
     const aSame = a.cluster===node.cluster ? 0 : 1;
     const bSame = b.cluster===node.cluster ? 0 : 1;
@@ -979,6 +1111,14 @@ function openEditForm(existing){
     </div>
     <label>Échéance (optionnel)</label>
     <input type="date" id="f-deadline" value="${node.deadline||''}">
+    <label>Lieu <span style="font-weight:400;color:var(--text-faint);">(optionnel — vide = peu importe où)</span></label>
+    <input type="text" id="f-location" list="location-list" value="${escapeAttr(node.location||'')}" placeholder="Ex : Chez mon père">
+    <datalist id="location-list">${locations.map(l=>`<option value="${escapeAttr(l)}">`).join('')}</datalist>
+    <label>Planifier pour le <span style="font-weight:400;color:var(--text-faint);">(optionnel)</span></label>
+    <div style="display:flex;gap:8px;">
+      <input type="date" id="f-pindate" value="${node.pinnedDate||''}" style="flex:1;">
+      <button type="button" class="btn-secondary" id="f-pin-today" style="flex-shrink:0;">Aujourd'hui</button>
+    </div>
     ${others.length? `<label>Dépend de <span style="font-weight:400;color:var(--text-faint);">(à faire avant celle-ci)</span></label>
     <div class="dep-list">${depListHtml('dep', currentDeps)}</div>
     <label>Nécessaire pour <span style="font-weight:400;color:var(--text-faint);">(celle-ci doit être faite avant)</span></label>
@@ -1004,12 +1144,16 @@ function openEditForm(existing){
     reqCb.addEventListener('change', ()=>{ depCb.disabled = reqCb.checked; });
   });
 
+  document.getElementById('f-pin-today').addEventListener('click', ()=>{
+    document.getElementById('f-pindate').value = todayISO();
+  });
+
   if(!isNew){
     document.getElementById('f-delete').addEventListener('click', ()=>{
       if(!confirm(`Supprimer définitivement « ${node.title} » ?`)) return;
       data.nodes = data.nodes.filter(n=>n.id!==node.id);
       data.links = data.links.filter(l=>l.from!==node.id && l.to!==node.id);
-      save(); closeSheet(); refreshAll();
+      save(); closeSheet(); refreshAll(); refreshCalendarView();
     });
   }
   document.getElementById('f-save').addEventListener('click', ()=>{
@@ -1021,6 +1165,8 @@ function openEditForm(existing){
     node.duration = parseDurationInput(document.getElementById('f-duration').value);
     node.energy = document.getElementById('f-energy').value;
     node.deadline = document.getElementById('f-deadline').value || null;
+    node.location = document.getElementById('f-location').value.trim() || null;
+    node.pinnedDate = document.getElementById('f-pindate').value || null;
     colorForCluster(cluster);
     if(isNew) data.nodes.push(node);
     // reconstruit tous les liens touchant cette tâche, dans les deux sens
@@ -1031,7 +1177,7 @@ function openEditForm(existing){
     sheet.querySelectorAll('[data-reqfor]:checked').forEach(cb=>{
       data.links.push({from: node.id, to: cb.dataset.reqfor});
     });
-    save(); closeSheet(); refreshAll();
+    save(); closeSheet(); refreshAll(); refreshCalendarView();
   });
 }
 
@@ -1039,20 +1185,23 @@ function openDetail(id){
   const n = data.nodes.find(x=>x.id===id);
   if(!n) return;
   const color = colorForCluster(n.cluster);
-  const pinnedToday = n.pinnedDate === todayISO();
   sheet.innerHTML = `
     <div class="sheet-handle"></div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
       <span class="cluster-dot" style="background:${color}"></span>
       <span style="font-size:12.5px;color:var(--text-dim)">${escapeHtml(n.cluster)}</span>
+      ${n.location? `<span style="font-size:12.5px;color:var(--text-faint);">· 📍 ${escapeHtml(n.location)}</span>`:''}
     </div>
     <div class="sheet-title" style="margin-bottom:4px;">${escapeHtml(n.title)}</div>
     <div style="font-size:13px;color:var(--text-dim);">
       ${n.duration? formatDuration(n.duration):'durée non estimée'}
       ${n.deadline? ` · échéance ${new Date(n.deadline).toLocaleDateString('fr-FR')}`:''}
+      ${n.completedDate? ` · fait le ${new Date(n.completedDate).toLocaleDateString('fr-FR')}`:''}
     </div>
-    <div class="detail-row">
-      <button class="btn-primary" id="d-pin">${pinnedToday? "Retirer d'aujourd'hui" : "Épingler à aujourd'hui"}</button>
+    <label style="margin-top:16px;">Planifié pour</label>
+    <div style="display:flex;gap:8px;">
+      <input type="date" id="d-pindate" value="${n.pinnedDate||''}" style="flex:1;">
+      <button class="btn-secondary" id="d-pin-today" style="flex-shrink:0;">Aujourd'hui</button>
     </div>
     <div class="detail-row">
       <button class="btn-secondary" id="d-done">${n.status==='done'?'Marquer à refaire':'Marquer comme fait'}</button>
@@ -1060,14 +1209,21 @@ function openDetail(id){
     </div>
   `;
   overlay.classList.add('open');
-  document.getElementById('d-pin').addEventListener('click', ()=>{
-    n.pinnedDate = pinnedToday ? null : todayISO();
-    save(); closeSheet();
+  const pindateInput = document.getElementById('d-pindate');
+  pindateInput.addEventListener('change', ()=>{
+    n.pinnedDate = pindateInput.value || null;
+    save(); refreshAll(); refreshCalendarView();
+  });
+  document.getElementById('d-pin-today').addEventListener('click', ()=>{
+    n.pinnedDate = todayISO();
+    pindateInput.value = n.pinnedDate;
+    save(); refreshAll(); refreshCalendarView();
   });
   document.getElementById('d-done').addEventListener('click', ()=>{
     const becomingDone = n.status !== 'done';
     n.status = becomingDone ? 'done' : 'todo';
-    save(); closeSheet(); refreshAll();
+    n.completedDate = becomingDone ? todayISO() : null;
+    save(); closeSheet(); refreshAll(); refreshCalendarView();
     if(becomingDone){ celebrateSmall(null); checkAllDoneToday(); }
   });
   document.getElementById('d-edit').addEventListener('click', ()=>{ openEditForm(n); });
@@ -1298,6 +1454,7 @@ let lastSuggestionId = null;
 function candidatesFiltered(){
   return data.nodes.filter(n=>{
     if(!isUnlocked(n)) return false;
+    if(!taskAtCurrentLocation(n)) return false;
     if(n.duration && n.duration > selTime) return false;
     if(energyRank[n.energy||'medium'] > energyRank[selEnergy]) return false;
     return true;
@@ -1308,7 +1465,7 @@ function candidatesFiltered(){
   });
 }
 function candidatesRandom(){
-  return data.nodes.filter(isUnlocked);
+  return data.nodes.filter(n=>isUnlocked(n) && taskAtCurrentLocation(n));
 }
 
 function renderResult(candidates, regenerate, emptyMsg){
@@ -1362,6 +1519,128 @@ function refreshAll(){
   }
 }
 
+function attemptSilentDriveReauth(retries){
+  retries = retries===undefined ? 10 : retries;
+  if(!driveFileId || !driveConfigured()) return;
+  if(typeof google==='undefined' || !google.accounts || !google.accounts.oauth2){
+    if(retries>0) setTimeout(()=>attemptSilentDriveReauth(retries-1), 300);
+    return;
+  }
+  try{
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: 'https://www.googleapis.com/auth/drive.file',
+      callback: (resp)=>{
+        if(resp && resp.access_token){ driveToken = resp.access_token; driveConnected = true; }
+      }
+    });
+    client.requestAccessToken({prompt:'none'});
+  }catch(e){ /* la reconnexion manuelle restera nécessaire */ }
+}
+
+// ---------------------------------------------------------------
+// CALENDRIER
+// ---------------------------------------------------------------
+let calViewDate = new Date();
+let selectedCalDate = todayISO();
+
+function pad2(n){ return String(n).padStart(2,'0'); }
+function isoOf(y,m,d){ return `${y}-${pad2(m+1)}-${pad2(d)}`; }
+
+function refreshCalendarView(){
+  if(document.getElementById('calendar-view').classList.contains('active')){
+    renderCalendar(); renderCalDayList();
+  }
+}
+
+function renderCalendar(){
+  const y = calViewDate.getFullYear(), m = calViewDate.getMonth();
+  document.getElementById('cal-month-label').textContent = calViewDate.toLocaleDateString('fr-FR', {month:'long', year:'numeric'});
+  const grid = document.getElementById('cal-grid');
+  const firstDay = new Date(y, m, 1);
+  const startOffset = (firstDay.getDay()+6)%7; // 0 = lundi
+  const daysInMonth = new Date(y, m+1, 0).getDate();
+  const today = todayISO();
+
+  // compte les tâches épinglées par jour pour ce mois
+  const counts = {};
+  data.nodes.forEach(n=>{ if(n.pinnedDate) counts[n.pinnedDate] = (counts[n.pinnedDate]||0)+1; });
+
+  let html = '';
+  for(let i=0;i<startOffset;i++) html += `<button class="cal-cell empty"></button>`;
+  for(let d=1; d<=daysInMonth; d++){
+    const iso = isoOf(y,m,d);
+    const classes = ['cal-cell'];
+    if(iso===today) classes.push('today');
+    if(iso===selectedCalDate) classes.push('selected');
+    html += `<button class="${classes.join(' ')}" data-date="${iso}">${d}${counts[iso]? `<span class="cal-dot"></span>`:''}</button>`;
+  }
+  grid.innerHTML = html;
+  grid.querySelectorAll('[data-date]').forEach(cell=>{
+    cell.addEventListener('click', ()=>{
+      selectedCalDate = cell.dataset.date;
+      renderCalendar(); renderCalDayList();
+    });
+  });
+}
+
+function renderCalDayList(){
+  const title = document.getElementById('cal-day-title');
+  const list = document.getElementById('cal-day-list');
+  const d = new Date(selectedCalDate+'T00:00:00');
+  title.textContent = d.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
+  const items = data.nodes.filter(n=>n.pinnedDate===selectedCalDate);
+  if(!items.length){
+    list.innerHTML = `<div class="empty-state">Rien de prévu ce jour-là.</div>`;
+    return;
+  }
+  items.sort((a,b)=> (a.status==='done')-(b.status==='done'));
+  list.innerHTML = items.map(n=>{
+    const color = colorForCluster(n.cluster);
+    return `<div class="task-row ${n.status==='done'?'done':''}" data-id="${n.id}">
+      <button class="check ${n.status==='done'?'checked':''}" data-action="cal-toggle" data-id="${n.id}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#12160F" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg>
+      </button>
+      <div class="task-main" data-action="cal-open" data-id="${n.id}">
+        <div class="task-title">${escapeHtml(n.title)}</div>
+        <div class="task-meta">
+          <span class="cluster-dot" style="background:${color}"></span>
+          <span>${escapeHtml(n.cluster)}</span>
+          ${n.duration? `<span>· ${formatDuration(n.duration)}</span>`:''}
+        </div>
+      </div>
+      <button class="unpin-btn" data-action="cal-unpin" data-id="${n.id}">×</button>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('[data-action=cal-toggle]').forEach(b=>b.addEventListener('click', ()=>{
+    const n = data.nodes.find(x=>x.id===b.dataset.id);
+    const becomingDone = n.status !== 'done';
+    n.status = becomingDone ? 'done' : 'todo';
+    n.completedDate = becomingDone ? todayISO() : null;
+    save();
+    if(becomingDone){
+      celebrateSmall(b.closest('.task-row'));
+      setTimeout(()=>{ renderCalDayList(); checkAllDoneToday(); }, 600);
+    }else{
+      renderCalDayList();
+    }
+  }));
+  list.querySelectorAll('[data-action=cal-open]').forEach(el=>el.addEventListener('click', ()=>openDetail(el.dataset.id)));
+  list.querySelectorAll('[data-action=cal-unpin]').forEach(b=>b.addEventListener('click', ()=>{
+    const n = data.nodes.find(x=>x.id===b.dataset.id);
+    n.pinnedDate = null;
+    save(); renderCalendar(); renderCalDayList();
+  }));
+}
+document.getElementById('cal-prev').addEventListener('click', ()=>{
+  calViewDate = new Date(calViewDate.getFullYear(), calViewDate.getMonth()-1, 1);
+  renderCalendar();
+});
+document.getElementById('cal-next').addEventListener('click', ()=>{
+  calViewDate = new Date(calViewDate.getFullYear(), calViewDate.getMonth()+1, 1);
+  renderCalendar();
+});
+
 (async function init(){
   await loadData();
   if(data.settings){
@@ -1369,8 +1648,10 @@ function refreshAll(){
     frozen = !!data.settings.frozen;
   }
   applyFreezeVisual();
+  updateLocationBar();
   renderPills();
   refreshAll();
+  attemptSilentDriveReauth();
 })();
 
 })();
