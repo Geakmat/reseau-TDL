@@ -763,6 +763,8 @@ let dragNode = null, dragOffset = {x:0,y:0};
 let clusterOff = {};
 let hideDone = false;
 let frozen = false;
+let zoom = 1, panX = 0, panY = 0;
+const ZOOM_MIN = 0.4, ZOOM_MAX = 3.5;
 const FORCE_DEFAULTS = { nodeSize:1, linkWidth:1.4, centerForce:0.0009, repelForce:3200, linkForce:0.02, linkDistance:100, siblingSpacing:60 };
 let forceConfig = Object.assign({}, FORCE_DEFAULTS);
 
@@ -888,7 +890,7 @@ function simStep(w,h){
 function renderGraph(){
   const rect = document.getElementById('graph-wrap').getBoundingClientRect();
   const w = rect.width||360, h = rect.height||500;
-  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.setAttribute('viewBox', `${panX} ${panY} ${w/zoom} ${h/zoom}`);
   const showOther = showOtherLocations();
   const visible = data.nodes.filter(n => {
     if(clusterOff[n.cluster] === true) return false;
@@ -953,10 +955,33 @@ function stopSim(){ simRunning=false; if(rafId) cancelAnimationFrame(rafId); }
 function svgPoint(evt){
   const rect = svg.getBoundingClientRect();
   const vb = svg.viewBox.baseVal;
-  const x = (evt.clientX-rect.left) * (vb.width/rect.width);
-  const y = (evt.clientY-rect.top) * (vb.height/rect.height);
+  const x = vb.x + (evt.clientX-rect.left) * (vb.width/rect.width);
+  const y = vb.y + (evt.clientY-rect.top) * (vb.height/rect.height);
   return {x,y};
 }
+
+// zoome en gardant le point (clientX, clientY) fixe à l'écran — molette et pincement s'appuient dessus
+function zoomAround(clientX, clientY, factor){
+  const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom*factor));
+  if(newZoom===zoom) return;
+  const rect = svg.getBoundingClientRect();
+  const vb = svg.viewBox.baseVal;
+  const wx = vb.x + (clientX-rect.left) * (vb.width/rect.width);
+  const wy = vb.y + (clientY-rect.top) * (vb.height/rect.height);
+  zoom = newZoom;
+  const containerRect = document.getElementById('graph-wrap').getBoundingClientRect();
+  const w = containerRect.width||360, h = containerRect.height||500;
+  const newVBwidth = w/zoom, newVBheight = h/zoom;
+  panX = wx - (clientX-rect.left) * (newVBwidth/rect.width);
+  panY = wy - (clientY-rect.top) * (newVBheight/rect.height);
+  svg.setAttribute('viewBox', `${panX} ${panY} ${newVBwidth} ${newVBheight}`);
+}
+svg.addEventListener('wheel', (evt)=>{
+  evt.preventDefault();
+  const factor = evt.deltaY < 0 ? 1.12 : 1/1.12;
+  zoomAround(evt.clientX, evt.clientY, factor);
+}, {passive:false});
+
 let didDrag = false;
 let pointerStart = {x:0,y:0};
 let dragPointerId = null;
@@ -1002,6 +1027,42 @@ function onNodeUp(evt){
   dragNode = null;
 }
 svg.addEventListener('pointerdown', onNodeDown);
+
+// pincement à deux doigts (tactile uniquement — la souris utilise déjà la molette ci-dessus)
+let touchPoints = new Map();
+let pinchLastDist = null;
+function distBetween(p1, p2){ return Math.hypot(p1.x-p2.x, p1.y-p2.y); }
+svg.addEventListener('pointerdown', (evt)=>{
+  if(evt.pointerType !== 'touch') return;
+  touchPoints.set(evt.pointerId, {x:evt.clientX, y:evt.clientY});
+  if(touchPoints.size===2){
+    // un deuxième doigt arrive : on annule un éventuel glisser de bulle démarré avec le premier
+    if(dragNode){
+      window.removeEventListener('pointermove', onNodeMove);
+      window.removeEventListener('pointerup', onNodeUp);
+      window.removeEventListener('pointercancel', onNodeUp);
+      dragNode = null;
+    }
+    pinchLastDist = distBetween(...touchPoints.values());
+  }
+});
+svg.addEventListener('pointermove', (evt)=>{
+  if(!touchPoints.has(evt.pointerId)) return;
+  touchPoints.set(evt.pointerId, {x:evt.clientX, y:evt.clientY});
+  if(touchPoints.size===2 && pinchLastDist){
+    const pts = [...touchPoints.values()];
+    const dist = distBetween(pts[0], pts[1]);
+    const mid = {x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2};
+    zoomAround(mid.x, mid.y, dist/pinchLastDist);
+    pinchLastDist = dist;
+  }
+});
+function releaseTouchPoint(evt){
+  touchPoints.delete(evt.pointerId);
+  if(touchPoints.size<2) pinchLastDist = null;
+}
+svg.addEventListener('pointerup', releaseTouchPoint);
+svg.addEventListener('pointercancel', releaseTouchPoint);
 
 function renderLegend(){
   const clusters = [...new Set(data.nodes.map(n=>n.cluster))];
