@@ -1028,6 +1028,89 @@ function onNodeUp(evt){
 }
 svg.addEventListener('pointerdown', onNodeDown);
 
+// déplacement libre (pan) quand on glisse sur le fond, hors des bulles
+let bgDragging = false, bgDidDrag = false, bgPointerId = null;
+let bgStartClient = {x:0,y:0}, bgStartPan = {x:0,y:0};
+
+function onBgPointerDown(evt){
+  if(evt.target.closest('.node')) return; // les bulles gèrent déjà leur propre glisser
+  evt.preventDefault();
+  bgDragging = true; bgDidDrag = false;
+  bgPointerId = evt.pointerId;
+  bgStartClient = {x:evt.clientX, y:evt.clientY};
+  bgStartPan = {x:panX, y:panY};
+  try{ svg.setPointerCapture(evt.pointerId); }catch(e){}
+  window.addEventListener('pointermove', onBgPointerMove);
+  window.addEventListener('pointerup', onBgPointerUp);
+  window.addEventListener('pointercancel', onBgPointerUp);
+}
+function onBgPointerMove(evt){
+  if(!bgDragging || evt.pointerId!==bgPointerId) return;
+  const moved = Math.hypot(evt.clientX-bgStartClient.x, evt.clientY-bgStartClient.y);
+  if(moved > DRAG_THRESHOLD) bgDidDrag = true;
+  const rect = svg.getBoundingClientRect();
+  const vb = svg.viewBox.baseVal;
+  const dxWorld = (evt.clientX-bgStartClient.x) * (vb.width/rect.width);
+  const dyWorld = (evt.clientY-bgStartClient.y) * (vb.height/rect.height);
+  panX = bgStartPan.x - dxWorld;
+  panY = bgStartPan.y - dyWorld;
+  svg.setAttribute('viewBox', `${panX} ${panY} ${vb.width} ${vb.height}`);
+}
+function cancelBgDrag(){
+  bgDragging = false;
+  window.removeEventListener('pointermove', onBgPointerMove);
+  window.removeEventListener('pointerup', onBgPointerUp);
+  window.removeEventListener('pointercancel', onBgPointerUp);
+}
+function onBgPointerUp(evt){
+  const wasTap = !bgDidDrag;
+  cancelBgDrag();
+  if(wasTap) registerBgTap();
+}
+svg.addEventListener('pointerdown', onBgPointerDown);
+
+// trois appuis rapides dans le vide = recentrer la vue sur les bulles visibles
+let bgTapTimes = [];
+function registerBgTap(){
+  const now = Date.now();
+  bgTapTimes = bgTapTimes.filter(t=>now-t < 600);
+  bgTapTimes.push(now);
+  if(bgTapTimes.length>=3){
+    bgTapTimes = [];
+    resetView();
+  }
+}
+function resetView(){
+  const showOther = showOtherLocations();
+  const visibleNodes = data.nodes.filter(n=>{
+    if(clusterOff[n.cluster]===true) return false;
+    if(hideDone && n.status==='done') return false;
+    if(!taskAtCurrentLocation(n) && !showOther) return false;
+    return true;
+  });
+  const containerRect = document.getElementById('graph-wrap').getBoundingClientRect();
+  const w = containerRect.width||360, h = containerRect.height||500;
+  if(!visibleNodes.length){
+    zoom = 1; panX = 0; panY = 0;
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    return;
+  }
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  visibleNodes.forEach(n=>{
+    const r = radiusFor(n);
+    minX=Math.min(minX,n.x-r); maxX=Math.max(maxX,n.x+r);
+    minY=Math.min(minY,n.y-r); maxY=Math.max(maxY,n.y+r);
+  });
+  const pad = 40;
+  minX-=pad; maxX+=pad; minY-=pad; maxY+=pad;
+  const contentW = Math.max(60, maxX-minX), contentH = Math.max(60, maxY-minY);
+  zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.min(w/contentW, h/contentH)));
+  const vbW = w/zoom, vbH = h/zoom;
+  panX = (minX+maxX)/2 - vbW/2;
+  panY = (minY+maxY)/2 - vbH/2;
+  svg.setAttribute('viewBox', `${panX} ${panY} ${vbW} ${vbH}`);
+}
+
 // pincement à deux doigts (tactile uniquement — la souris utilise déjà la molette ci-dessus)
 let touchPoints = new Map();
 let pinchLastDist = null;
@@ -1036,13 +1119,14 @@ svg.addEventListener('pointerdown', (evt)=>{
   if(evt.pointerType !== 'touch') return;
   touchPoints.set(evt.pointerId, {x:evt.clientX, y:evt.clientY});
   if(touchPoints.size===2){
-    // un deuxième doigt arrive : on annule un éventuel glisser de bulle démarré avec le premier
+    // un deuxième doigt arrive : on annule un éventuel glisser de bulle ou de fond démarré avec le premier
     if(dragNode){
       window.removeEventListener('pointermove', onNodeMove);
       window.removeEventListener('pointerup', onNodeUp);
       window.removeEventListener('pointercancel', onNodeUp);
       dragNode = null;
     }
+    if(bgDragging) cancelBgDrag();
     pinchLastDist = distBetween(...touchPoints.values());
   }
 });
